@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Distance Monitoring</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        .subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+            font-size: 1.2em;
+        }
+        .chart-container {
+            position: relative;
+            height: 600px;
+            margin-bottom: 30px;
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 25px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        input[type="range"] {
+            width: 200px;
+            height: 6px;
+            border-radius: 3px;
+            background: #ddd;
+            outline: none;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        .legend-container {
+            max-height: 200px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 5px;
+        }
+        .legend-color {
+            width: 20px;
+            height: 3px;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Dual-Arm Collision Distance Monitoring</h1>
+        <p class="subtitle">Real-time visualization of all 16 inter-arm link distances</p>
+        
+        <div class="controls">
+            <div class="control-group">
+                <button id="playBtn">▶️ Play</button>
+                <button id="pauseBtn" disabled>⏸️ Pause</button>
+                <button id="resetBtn">🔄 Reset</button>
+            </div>
+            <div class="control-group">
+                <label>Speed:</label>
+                <input type="range" id="speedSlider" min="1" max="10" value="5">
+                <span id="speedValue">5x</span>
+            </div>
+            <div class="control-group">
+                <label>Time: </label>
+                <span id="currentTime">0.00s</span>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="distanceChart"></canvas>
+        </div>
+
+        <div class="legend-container" id="legendContainer">
+            <h3>Distance Legend (Left Arm Links vs Right Arm Links)</h3>
+            <div id="legendContent"></div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="minDist">0.000</div>
+                <div class="stat-label">Current Min Distance (m)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="maxDist">0.000</div>
+                <div class="stat-label">Current Max Distance (m)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avgDist">0.000</div>
+                <div class="stat-label">Current Avg Distance (m)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="collisionRisk">SAFE</div>
+                <div class="stat-label">Collision Risk Status</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sample data structure - replace with actual CSV data
+        const rawCSVData = `end_eff_L_posX,end_eff_L_posY,end_eff_L_posZ,end_eff_R_posX,end_eff_R_posY,end_eff_R_posZ,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,d11,d12,d13,d14,d15,d16
+0.148,-0.069,0.199,0.613,-0.069,0.199,0.672,0.592,0.584,0.584,0.573,0.488,0.478,0.478,0.573,0.488,0.465,0.465,0.589,0.497,0.465,0.465
+0.148,-0.069,0.199,0.613,-0.069,0.199,0.672,0.592,0.584,0.584,0.573,0.488,0.478,0.478,0.573,0.488,0.465,0.465,0.589,0.497,0.465,0.465
+0.148,-0.069,0.199,0.613,-0.069,0.199,0.672,0.591,0.584,0.584,0.573,0.488,0.478,0.478,0.573,0.488,0.465,0.465,0.589,0.497,0.465,0.464`;
+
+        let distanceData = [];
+        let currentFrame = 0;
+        let isPlaying = false;
+        let animationId = null;
+        let chart = null;
+        const SAFETY_THRESHOLD = 0.1; // 10cm safety threshold
+
+        // Generate realistic test data
+        function generateTestData() {
+            const data = [];
+            const numFrames = 300;
+            
+            for (let i = 0; i < numFrames; i++) {
+                const t = i / 50; // Time in seconds
+                const distances = [];
+                
+                // Generate 16 realistic distances with some correlation and variation
+                for (let j = 0; j < 16; j++) {
+                    const baseDistance = 0.2 + 0.2 * Math.sin(t * 0.5 + j * 0.3);
+                    const noise = 0.05 * Math.sin(t * 2 + j) + 0.02 * Math.random();
+                    const collision = Math.sin(t * 0.8) < -0.7 ? -0.1 : 0;
+                    distances.push(Math.max(0.05, baseDistance + noise + collision));
+                }
+                
+                data.push({
+                    time: t,
+                    distances: distances
+                });
+            }
+            return data;
+        }
+
+        // Initialize data
+        distanceData = generateTestData();
+
+        // Color palette for 16 lines
+        const colors = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD',
+            '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9', '#F8C471', '#82E0AA',
+            '#F1948A', '#85C1E9', '#D2B4DE', '#A3E4D7'
+        ];
+
+        // Chart configuration
+        const ctx = document.getElementById('distanceChart').getContext('2d');
+        
+        function initChart() {
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: []
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return `Time: ${context[0].label}s`;
+                                },
+                                label: function(context) {
+                                    const linkPair = getLinkPairName(context.datasetIndex);
+                                    return `${linkPair}: ${context.parsed.y.toFixed(3)}m`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Time (seconds)',
+                                font: { size: 14, weight: 'bold' }
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Distance (meters)',
+                                font: { size: 14, weight: 'bold' }
+                            },
+                            min: 0,
+                            max: 0.7
+                        }
+                    }
+                }
+            });
+
+            // Initialize datasets
+            for (let i = 0; i < 16; i++) {
+                chart.data.datasets.push({
+                    label: `Distance ${i+1}`,
+                    data: [],
+                    borderColor: colors[i],
+                    backgroundColor: colors[i] + '20',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.4
+                });
+            }
+
+            // Add safety threshold line
+            chart.data.datasets.push({
+                label: 'Safety Threshold',
+                data: [],
+                borderColor: '#FF0000',
+                borderWidth: 3,
+                borderDash: [5, 5],
+                pointRadius: 0,
+                fill: false
+            });
+
+            updateLegend();
+        }
+
+        function getLinkPairName(index) {
+            const leftLink = Math.floor(index / 4) + 3; // Links 3-6 of left arm
+            const rightLink = (index % 4) + 3; // Links 3-6 of right arm
+            return `L${leftLink}-R${rightLink}`;
+        }
+
+        function updateLegend() {
+            const legendContent = document.getElementById('legendContent');
+            legendContent.innerHTML = '';
+            
+            for (let i = 0; i < 16; i++) {
+                const div = document.createElement('div');
+                div.className = 'legend-item';
+                div.innerHTML = `
+                    <div class="legend-color" style="background-color: ${colors[i]}"></div>
+                    <span>${getLinkPairName(i)}</span>
+                `;
+                legendContent.appendChild(div);
+            }
+        }
+
+        function updateChart() {
+            if (currentFrame >= distanceData.length) {
+                pause();
+                return;
+            }
+
+            const currentData = distanceData[currentFrame];
+            const time = currentData.time.toFixed(2);
+
+            // Update chart data
+            chart.data.labels.push(time);
+            
+            for (let i = 0; i < 16; i++) {
+                chart.data.datasets[i].data.push(currentData.distances[i]);
+            }
+
+            // Update safety threshold line
+            chart.data.datasets[16].data.push(SAFETY_THRESHOLD);
+
+            // Keep only last 100 points for performance
+            if (chart.data.labels.length > 100) {
+                chart.data.labels.shift();
+                chart.data.datasets.forEach(dataset => dataset.data.shift());
+            }
+
+            chart.update('none');
+            updateStats(currentData);
+            updateTimeDisplay(currentData.time);
+
+            currentFrame++;
+        }
+
+        function updateStats(data) {
+            const distances = data.distances;
+            const minDist = Math.min(...distances);
+            const maxDist = Math.max(...distances);
+            const avgDist = distances.reduce((a, b) => a + b, 0) / distances.length;
+
+            document.getElementById('minDist').textContent = minDist.toFixed(3);
+            document.getElementById('maxDist').textContent = maxDist.toFixed(3);
+            document.getElementById('avgDist').textContent = avgDist.toFixed(3);
+
+            const riskElement = document.getElementById('collisionRisk');
+            if (minDist < SAFETY_THRESHOLD) {
+                riskElement.textContent = 'RISK';
+                riskElement.parentElement.style.background = 'linear-gradient(135deg, #ff4757, #ff3838)';
+            } else if (minDist < SAFETY_THRESHOLD * 1.5) {
+                riskElement.textContent = 'CAUTION';
+                riskElement.parentElement.style.background = 'linear-gradient(135deg, #ffa502, #ff6348)';
+            } else {
+                riskElement.textContent = 'SAFE';
+                riskElement.parentElement.style.background = 'linear-gradient(135deg, #2ed573, #1e90ff)';
+            }
+        }
+
+        function updateTimeDisplay(time) {
+            document.getElementById('currentTime').textContent = time.toFixed(2) + 's';
+        }
+
+        function play() {
+            if (isPlaying) return;
+            isPlaying = true;
+            document.getElementById('playBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = false;
+            animate();
+        }
+
+        function pause() {
+            isPlaying = false;
+            document.getElementById('playBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+        }
+
+        function reset() {
+            pause();
+            currentFrame = 0;
+            chart.data.labels = [];
+            chart.data.datasets.forEach(dataset => dataset.data = []);
+            chart.update();
+            updateStats(distanceData[0]);
+            updateTimeDisplay(0);
+        }
+
+        function animate() {
+            if (!isPlaying) return;
+            
+            const speed = parseInt(document.getElementById('speedSlider').value);
+            const delay = Math.max(1, 11 - speed) * 10;
+            
+            setTimeout(() => {
+                updateChart();
+                if (isPlaying) {
+                    animationId = requestAnimationFrame(animate);
+                }
+            }, delay);
+        }
+
+        // Event listeners
+        document.getElementById('playBtn').addEventListener('click', play);
+        document.getElementById('pauseBtn').addEventListener('click', pause);
+        document.getElementById('resetBtn').addEventListener('click', reset);
+        document.getElementById('speedSlider').addEventListener('input', (e) => {
+            document.getElementById('speedValue').textContent = e.target.value + 'x';
+        });
+
+        // Initialize
+        initChart();
+        updateStats(distanceData[0]);
+    </script>
+</body>
+</html>
